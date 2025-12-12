@@ -1,8 +1,11 @@
 package com.shakhawat.rbacabac.util;
 
 import lombok.experimental.UtilityClass;
+import org.springframework.security.authentication.AnonymousAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.core.GrantedAuthority;
+
+import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -17,15 +20,16 @@ public class SecurityUtil {
     public Set<String> getCurrentUserRoles() {
         var auth = SecurityContextHolder.getContext().getAuthentication();
 
-        if (auth == null || auth.getAuthorities() == null) {
+        if (auth == null || !auth.isAuthenticated() || auth instanceof AnonymousAuthenticationToken) {
             return Set.of();
         }
 
         return auth.getAuthorities().stream()
-                .map(GrantedAuthority::getAuthority)
+                .map(GrantedAuthority::getAuthority).filter(Objects::nonNull)
                 .filter(role -> role.startsWith("ROLE_"))
                 .collect(Collectors.toSet());
     }
+
 
     public boolean hasRole(String role) {
         var roles = getCurrentUserRoles();

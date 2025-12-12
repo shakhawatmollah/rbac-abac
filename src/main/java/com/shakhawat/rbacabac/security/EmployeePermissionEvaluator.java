@@ -4,12 +4,15 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Component;
 
+import java.util.Objects;
+
 @Component("employeePermissionEvaluator")
 @RequiredArgsConstructor
 public class EmployeePermissionEvaluator {
 
     public boolean canModify(Long employeeId) {
         var auth = SecurityContextHolder.getContext().getAuthentication();
+        assert auth != null;
         var userPrincipal = (UserPrincipal) auth.getPrincipal();
 
         // Admin can modify anyone
@@ -23,11 +26,13 @@ public class EmployeePermissionEvaluator {
         }
 
         // Users can only modify themselves
+        assert userPrincipal != null;
         return userPrincipal.getId().equals(employeeId);
     }
 
     public boolean canView(Long employeeId) {
         var auth = SecurityContextHolder.getContext().getAuthentication();
+        assert auth != null;
         var userPrincipal = (UserPrincipal) auth.getPrincipal();
 
         // Manager and above can view anyone
@@ -36,11 +41,12 @@ public class EmployeePermissionEvaluator {
         }
 
         // Users can view themselves
+        assert userPrincipal != null;
         return userPrincipal.getId().equals(employeeId);
     }
 
     private boolean hasRole(org.springframework.security.core.Authentication auth, String role) {
         return auth.getAuthorities().stream()
-                .anyMatch(a -> a.getAuthority().equals(role));
+                .anyMatch(a -> Objects.equals(a.getAuthority(), role));
     }
 }

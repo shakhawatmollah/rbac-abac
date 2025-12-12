@@ -28,6 +28,7 @@ public class JwtTokenProvider {
         var now = new Date();
         var expiryDate = new Date(now.getTime() + jwtExpiration);
 
+        assert userPrincipal != null;
         var roles = userPrincipal.getAuthorities().stream()
                 .map(Object::toString)
                 .collect(Collectors.toList());

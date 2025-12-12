@@ -3,15 +3,19 @@ package com.shakhawat.rbacabac.filter;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.shakhawat.rbacabac.config.RateLimitingService;
 import com.shakhawat.rbacabac.config.RateLimitingService.RateLimitType;
-import jakarta.servlet.*;
-import jakarta.servlet.http.*;
+import jakarta.servlet.FilterChain;
+import jakarta.servlet.ServletException;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
+
 import java.io.IOException;
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.Map;
 
@@ -28,68 +32,60 @@ public class RateLimitFilter extends OncePerRequestFilter {
                                     HttpServletResponse response,
                                     FilterChain filterChain) throws ServletException, IOException {
 
-        var clientId = getClientIdentifier(request);
-        var path = request.getRequestURI();
-        var method = request.getMethod();
+        String clientId = getClientIdentifier(request);
+        String path = request.getRequestURI();
+        String method = request.getMethod();
 
-        var limitType = determineLimitType(path, method);
+        RateLimitType limitType = determineLimitType(path, method);
 
         if (!rateLimitingService.tryConsume(clientId, limitType)) {
-            log.warn("Rate limit exceeded for client: {} on path: {}", clientId, path);
+            log.warn("Rate limit exceeded for client: {} on path: {} [{}]", clientId, path, method);
             sendRateLimitError(response, clientId, limitType);
             return;
         }
 
         // Add rate limit headers
-        var availableTokens = rateLimitingService.getAvailableTokens(clientId, limitType);
+        long remainingTokens = rateLimitingService.getAvailableTokens(clientId, limitType);
         response.addHeader("X-RateLimit-Limit", String.valueOf(limitType.getCapacity()));
-        response.addHeader("X-RateLimit-Remaining", String.valueOf(availableTokens));
+        response.addHeader("X-RateLimit-Remaining", String.valueOf(remainingTokens));
 
         filterChain.doFilter(request, response);
     }
 
     private String getClientIdentifier(HttpServletRequest request) {
-        // Try to get authenticated user email first
         var principal = request.getUserPrincipal();
-        if (principal != null) {
+        if (principal != null && principal.getName() != null) {
             return "user:" + principal.getName();
         }
 
-        // Fall back to IP address
-        var xfHeader = request.getHeader("X-Forwarded-For");
-        if (xfHeader != null) {
-            return "ip:" + xfHeader.split(",")[0];
+        String xfHeader = request.getHeader("X-Forwarded-For");
+        if (xfHeader != null && !xfHeader.isBlank()) {
+            return "ip:" + xfHeader.split(",")[0].trim();
         }
+
         return "ip:" + request.getRemoteAddr();
     }
 
     private RateLimitType determineLimitType(String path, String method) {
-        // Login endpoint has stricter limits
-        if (path.contains("/auth/login")) {
+        if (path != null && path.contains("/auth/login")) {
             return RateLimitType.LOGIN;
         }
 
-        // Write operations (POST, PUT, DELETE, PATCH)
-        if (method.equals("POST") || method.equals("PUT") ||
-                method.equals("DELETE") || method.equals("PATCH")) {
-            return RateLimitType.API_WRITE;
-        }
-
-        // Read operations (GET)
-        if (method.equals("GET")) {
-            return RateLimitType.API_READ;
-        }
-
-        return RateLimitType.API_GENERAL;
+        return switch (method) {
+            case "POST", "PUT", "DELETE", "PATCH" -> RateLimitType.API_WRITE;
+            case "GET" -> RateLimitType.API_READ;
+            default -> RateLimitType.API_GENERAL;
+        };
     }
 
     private void sendRateLimitError(HttpServletResponse response,
                                     String clientId,
                                     RateLimitType limitType) throws IOException {
+
         response.setStatus(HttpStatus.TOO_MANY_REQUESTS.value());
         response.setContentType(MediaType.APPLICATION_JSON_VALUE);
 
-        var errorResponse = Map.of(
+        Map<String, Object> errorResponse = Map.of(
                 "success", false,
                 "message", "Rate limit exceeded. Please try again later.",
                 "details", String.format("Limit: %d requests per %s",
@@ -101,12 +97,19 @@ public class RateLimitFilter extends OncePerRequestFilter {
         response.getWriter().write(objectMapper.writeValueAsString(errorResponse));
     }
 
-    private String formatDuration(java.time.Duration duration) {
-        var minutes = duration.toMinutes();
-        if (minutes < 60) {
+    private String formatDuration(Duration duration) {
+        if (duration == null) return "unknown";
+
+        long seconds = duration.getSeconds();
+
+        if (seconds < 60) {
+            return seconds + " second" + (seconds != 1 ? "s" : "");
+        } else if (seconds < 3600) {
+            long minutes = seconds / 60;
             return minutes + " minute" + (minutes != 1 ? "s" : "");
+        } else {
+            long hours = seconds / 3600;
+            return hours + " hour" + (hours != 1 ? "s" : "");
         }
-        var hours = duration.toHours();
-        return hours + " hour" + (hours != 1 ? "s" : "");
     }
 }

@@ -42,6 +42,7 @@ public class AuthService {
         var userPrincipal = (UserPrincipal) authentication.getPrincipal();
 
         // Create refresh token
+        assert userPrincipal != null;
         var refreshToken = refreshTokenService.createRefreshToken(
                 userPrincipal.getId(),
                 httpRequest
